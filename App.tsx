@@ -502,7 +502,8 @@ const App: React.FC = () => {
     }
 
     const query = formData.name.trim();
-    if (query.length < 2) {
+    const minChars = newAssetType === AssetType.STOCKS ? 3 : 2;
+    if (query.length < minChars) {
       setInstrumentSuggestions([]);
       setIsSuggesting(false);
       return;
@@ -519,7 +520,7 @@ const App: React.FC = () => {
       } finally {
         if (!cancelled) setIsSuggesting(false);
       }
-    }, 300);
+    }, 850);
 
     return () => {
       cancelled = true;
@@ -1763,7 +1764,7 @@ const App: React.FC = () => {
                             <div className="text-[10px] font-black uppercase tracking-wider text-slate-400 mt-1">{s.symbol}</div>
                           </button>
                         ))}
-                        {!isSuggesting && instrumentSuggestions.length === 0 && formData.name.trim().length >= 2 && (
+                        {!isSuggesting && instrumentSuggestions.length === 0 && formData.name.trim().length >= (newAssetType === AssetType.STOCKS ? 3 : 2) && (
                           <div className="px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-300">No matching instruments</div>
                         )}
                       </div>

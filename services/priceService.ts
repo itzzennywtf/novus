@@ -175,6 +175,10 @@ const getFetchTargets = (url: string): string[] => {
   const targets: string[] = [];
   const isLocalDev = import.meta.env.DEV;
 
+  if (url.startsWith("/api/")) {
+    return [url];
+  }
+
   try {
     const parsed = new URL(url);
     if (parsed.hostname === "query1.finance.yahoo.com") {
@@ -219,6 +223,7 @@ const getFetchTargets = (url: string): string[] => {
 
 const fetchJson = async <T>(url: string): Promise<T> => {
   const isYahoo = url.includes("query1.finance.yahoo.com");
+  const isInternalApi = url.startsWith("/api/");
   const targets = getFetchTargets(url);
 
   let lastError: unknown = null;
@@ -246,7 +251,7 @@ const fetchJson = async <T>(url: string): Promise<T> => {
 
   // Final fallback for relays that wrap the payload in `contents`.
   // Skip this for Yahoo to avoid CORS/500 noise in production.
-  if (isYahoo) {
+  if (isYahoo || isInternalApi) {
     throw lastError instanceof Error ? lastError : new Error(`Unable to fetch ${url}`);
   }
   try {
@@ -314,6 +319,9 @@ const STOCK_SYMBOL_ALIASES: Record<string, string> = {
   ITC: "ITC.NS",
   LT: "LT.NS",
   AXISBANK: "AXISBANK.NS",
+  TATAMOTORS: "TATAMOTORS.NS",
+  TATAMOTOR: "TATAMOTORS.NS",
+  BHARTI: "BHARTIARTL.NS",
 };
 
 interface YahooChartResponse {
@@ -618,12 +626,6 @@ const getStockCandidates = (name: string): string[] => {
 const fetchStockLikeData = async (name: string, purchaseDate: string, lite = false): Promise<MarketData> => {
   const candidates = getStockCandidates(name);
   const range = lite ? "6mo" : "10y";
-  try {
-    const resolved = await resolveYahooSymbol(name, ["EQUITY"]);
-    if (resolved && !candidates.includes(resolved)) candidates.unshift(resolved);
-  } catch {
-    // Keep manual candidates.
-  }
 
   for (const symbol of candidates) {
     try {
