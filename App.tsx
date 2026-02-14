@@ -530,6 +530,22 @@ const App: React.FC = () => {
   };
   const formatOneDecimal = (value: number) =>
     value.toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const amountTextClass = (value: number, mode: 'hero' | 'section' | 'holding' = 'section') => {
+    const len = formatOneDecimal(value).length;
+    if (mode === 'hero') {
+      if (len >= 16) return 'text-[clamp(1.55rem,8.6vw,2.4rem)]';
+      if (len >= 13) return 'text-[clamp(1.9rem,10vw,3rem)]';
+      return 'text-[clamp(2.3rem,11vw,3.9rem)]';
+    }
+    if (mode === 'holding') {
+      if (len >= 16) return 'text-[clamp(1.35rem,7vw,2rem)]';
+      if (len >= 13) return 'text-[clamp(1.6rem,8.4vw,2.5rem)]';
+      return 'text-[clamp(1.9rem,9.5vw,3.1rem)]';
+    }
+    if (len >= 16) return 'text-[clamp(1.4rem,7.6vw,2rem)]';
+    if (len >= 13) return 'text-[clamp(1.7rem,8.8vw,2.6rem)]';
+    return 'text-[clamp(2rem,10vw,3.2rem)]';
+  };
   const buildMonthTimeline = (months: number) => Array.from({ length: months }, (_, idx) => {
     const d = new Date();
     d.setMonth(d.getMonth() - (months - 1 - idx));
@@ -1031,14 +1047,14 @@ const App: React.FC = () => {
 
   const renderHome = () => (
     <div className="space-y-8 animate-in fade-in pb-24">
-      <section className="bg-slate-900 text-white p-10 rounded-[4rem] premium-shadow relative overflow-hidden">
+      <section className="bg-slate-900 text-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow relative overflow-hidden">
         <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/20 rounded-full -mr-32 -mt-32 blur-[100px]"></div>
         <div className="relative z-10 text-center">
           <p className="text-white/30 text-[10px] font-black uppercase tracking-[0.4em] mb-4">Total Wealth</p>
-          <h2 className={`${formatOneDecimal(summary.totalCurrentValue).length > 11 ? 'text-5xl' : 'text-6xl'} font-black tracking-tighter mb-8 whitespace-nowrap`}>
+          <h2 className={`${amountTextClass(summary.totalCurrentValue, 'hero')} font-black tracking-tighter leading-none mb-8 whitespace-nowrap`}>
             {profile.currency}{formatOneDecimal(summary.totalCurrentValue)}
           </h2>
-          <p className="text-white/50 text-[10px] font-black uppercase tracking-[0.25em] mb-4">
+          <p className="text-white/50 text-[clamp(0.58rem,2.5vw,0.72rem)] font-black uppercase tracking-[0.2em] mb-4 whitespace-nowrap">
             Invested Value: {profile.currency}{summary.totalInvested.toLocaleString('en-IN')}
           </p>
           <div className="grid grid-cols-3 gap-3">
@@ -1104,10 +1120,10 @@ const App: React.FC = () => {
           <h2 className="text-3xl font-black text-slate-900 tracking-tight">{meta.label}</h2>
         </div>
 
-        <div className={`p-10 rounded-[4rem] ${meta.bg} relative shadow-sm`}>
+        <div className={`p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] ${meta.bg} relative shadow-sm`}>
            <p className="text-slate-500 text-[10px] font-black uppercase mb-2">Shelf Value</p>
-           <h3 className="text-5xl font-black text-slate-900 tracking-tighter">{profile.currency}{assetSummary.total.toLocaleString('en-IN')}</h3>
-           <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.2em] mt-2">
+           <h3 className={`${amountTextClass(assetSummary.total, 'section')} font-black text-slate-900 tracking-tighter leading-none whitespace-nowrap`}>{profile.currency}{assetSummary.total.toLocaleString('en-IN')}</h3>
+           <p className="text-slate-500 text-[clamp(0.58rem,2.5vw,0.72rem)] font-black uppercase tracking-[0.16em] mt-2 whitespace-nowrap">
              Invested Value: {profile.currency}{assetSummary.invested.toLocaleString('en-IN')}
            </p>
            <div className="grid grid-cols-3 gap-3 mt-6">
@@ -1229,9 +1245,9 @@ const App: React.FC = () => {
           <h2 className="text-3xl font-black text-slate-900 tracking-tighter">{item.name}</h2>
         </div>
 
-        <section className="bg-slate-900 text-white p-10 rounded-[4rem] premium-shadow relative overflow-hidden">
+        <section className="bg-slate-900 text-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow relative overflow-hidden">
           <p className="text-white/40 text-[10px] font-black uppercase mb-2">Live Price</p>
-          <h2 className="text-5xl font-black mb-8">{profile.currency}{item.currentValue.toLocaleString('en-IN')}</h2>
+          <h2 className={`${amountTextClass(item.currentValue, 'holding')} font-black mb-8 leading-none whitespace-nowrap`}>{profile.currency}{item.currentValue.toLocaleString('en-IN')}</h2>
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white/5 p-4 rounded-3xl border border-white/5">
               <span className="text-[8px] font-black uppercase text-white/40">Total Change</span>
@@ -1279,7 +1295,7 @@ const App: React.FC = () => {
           {isProcessing ? <div className="h-[200px] flex items-center justify-center animate-pulse text-slate-200 font-black">Syncing your position...</div> : <PerformanceLineChart data={visiblePositionTrend} height={200} color="#10B981" />}
         </div>
 
-        <div className="bg-indigo-600 text-white p-10 rounded-[4rem] shadow-2xl flex flex-col items-center text-center">
+        <div className="bg-indigo-600 text-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] shadow-2xl flex flex-col items-center text-center">
            <div className="w-16 h-16 bg-white/20 rounded-3xl flex items-center justify-center mb-6"><svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg></div>
            <h4 className="font-black text-xl mb-3 uppercase tracking-tighter">AI Prediction</h4>
            <p className="text-indigo-100 text-sm italic font-medium leading-relaxed">"{prediction || "Gathering market intelligence..."}"</p>
@@ -1334,23 +1350,23 @@ const App: React.FC = () => {
         <h2 className="text-4xl font-black text-slate-900 tracking-tighter">Alpha Analytics</h2>
         {investments.length > 0 ? (
            <div className="space-y-8">
-             <div className="bg-white p-10 rounded-[4rem] premium-shadow">
+             <div className="bg-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow">
                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-8 text-center">1. Asset Diversification</p>
                <CustomPieChart data={assetSplit} height={200} />
              </div>
-             <div className="bg-white p-10 rounded-[4rem] premium-shadow">
+             <div className="bg-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow">
                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-8 text-center">2. Top Profit Assets</p>
                <ProfitBarChart data={topProfitAssets} height={200} />
              </div>
-             <div className="bg-white p-10 rounded-[4rem] premium-shadow">
+             <div className="bg-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow">
                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-8 text-center">3. Lowest Return Assets</p>
                <ProfitBarChart data={topLossAssets} height={200} />
              </div>
-             <div className="bg-white p-10 rounded-[4rem] premium-shadow">
+             <div className="bg-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow">
                <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-8 text-center">4. Valuation Gap</p>
                <ComparisonBarChart data={investedVsCurrent} height={200} />
              </div>
-             <div className="bg-white p-10 rounded-[4rem] premium-shadow">
+             <div className="bg-white p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow">
                <div className="flex justify-between items-center mb-6">
                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">5. Portfolio History</p>
                  <div className="flex bg-slate-50 p-1 rounded-xl">
@@ -1372,7 +1388,7 @@ const App: React.FC = () => {
              </div>
              <button
                 onClick={() => setRiskDetailsOpen(true)}
-                className="w-full bg-slate-900 p-10 rounded-[4rem] premium-shadow text-white text-center"
+               className="w-full bg-slate-900 p-7 sm:p-10 rounded-[2.75rem] sm:rounded-[4rem] premium-shadow text-white text-center"
              >
                 <p className="text-[10px] font-black uppercase tracking-widest text-white/40 mb-4">6. Risk Rating</p>
                 <h4 className={`text-3xl font-black ${riskProfile.colorClass}`}>{riskProfile.label}</h4>
@@ -1507,7 +1523,7 @@ const App: React.FC = () => {
   if (supabaseError) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-[#F8FAFC] flex items-center justify-center px-8">
-        <div className="w-full bg-white p-10 rounded-[3rem] premium-shadow border border-rose-100 text-center">
+        <div className="w-full bg-white p-7 sm:p-10 rounded-[2.5rem] sm:rounded-[3rem] premium-shadow border border-rose-100 text-center">
           <p className="text-[10px] font-black uppercase tracking-widest text-rose-400">Supabase Error</p>
           <h2 className="text-2xl font-black text-slate-900 mt-3">Failed to load data</h2>
           <p className="text-xs text-slate-500 mt-2 break-words">{supabaseError}</p>
@@ -1524,7 +1540,7 @@ const App: React.FC = () => {
   if (!hasHydratedState) {
     return (
       <div className="max-w-md mx-auto min-h-screen bg-[#F8FAFC] flex items-center justify-center px-8">
-        <div className="w-full bg-white p-10 rounded-[3rem] premium-shadow border border-slate-100 text-center">
+        <div className="w-full bg-white p-7 sm:p-10 rounded-[2.5rem] sm:rounded-[3rem] premium-shadow border border-slate-100 text-center">
           <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Syncing</p>
           <h2 className="text-2xl font-black text-slate-900 mt-3">Loading Portfolio</h2>
           <p className="text-sm text-slate-500 mt-2">Fetching latest data from Supabase...</p>
@@ -1535,15 +1551,15 @@ const App: React.FC = () => {
 
   return (
     <div className="max-w-md mx-auto min-h-screen bg-[#F8FAFC] flex flex-col relative overflow-x-hidden no-scrollbar">
-      <header className="px-10 pt-16 pb-8 flex justify-between items-center sticky top-0 z-[90] backdrop-blur-xl">
-        <h1 className="text-4xl font-black text-slate-900 tracking-tighter">Novus</h1>
-        <div className="flex items-center gap-4 text-right">
+      <header className="px-5 sm:px-10 pt-8 sm:pt-16 pb-6 sm:pb-8 flex justify-between items-center sticky top-0 z-[90] backdrop-blur-xl">
+        <h1 className="text-3xl sm:text-4xl font-black text-slate-900 tracking-tighter">Novus</h1>
+        <div className="flex items-center gap-3 sm:gap-4 text-right">
           <div><p className="text-[8px] font-black uppercase text-slate-400">Account</p><p className="text-xs font-black text-slate-900">{profile.name}</p></div>
-          <button onClick={() => setView('SETTINGS')} className="w-14 h-14 rounded-3xl bg-white premium-shadow flex items-center justify-center text-slate-400"><svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg></button>
+          <button onClick={() => setView('SETTINGS')} className="w-12 h-12 sm:w-14 sm:h-14 rounded-3xl bg-white premium-shadow flex items-center justify-center text-slate-400"><svg className="w-6 h-6 sm:w-7 sm:h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg></button>
         </div>
       </header>
 
-      <main className="flex-1 px-10 pb-44">
+      <main className="flex-1 px-5 sm:px-10 pb-56 sm:pb-44">
         {view === 'HOME' && renderHome()}
         {view === 'REPORTS' && renderReports()}
         {view === 'ASSET_DETAIL' && renderAssetDetail()}
@@ -1654,7 +1670,7 @@ const App: React.FC = () => {
         )}
         {view === 'SETTINGS' && renderSettings()}
         {view === 'ADD_FLOW' && (
-          <div className="fixed inset-0 z-[300] bg-white flex flex-col p-10 overflow-y-auto no-scrollbar animate-in slide-in-from-bottom">
+          <div className="fixed inset-0 z-[300] bg-white flex flex-col p-5 sm:p-10 overflow-y-auto no-scrollbar animate-in slide-in-from-bottom">
             <div className="flex justify-between items-center mb-12">
                <h2 className="text-3xl font-black tracking-tight">{formStep === 1 ? 'New Asset' : 'Details'}</h2>
                <button onClick={() => { setView('HOME'); setSelectedSuggestion(null); setInstrumentSuggestions([]); }} className="p-4 bg-slate-50 rounded-[1.5rem]"><svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg></button>
@@ -1825,10 +1841,10 @@ const App: React.FC = () => {
         </div>
       )}
 
-      <nav className="fixed bottom-8 left-10 right-10 h-24 glass-effect rounded-[3.5rem] premium-shadow z-[150] flex items-center justify-around px-4">
+      <nav className="fixed bottom-4 sm:bottom-8 left-4 sm:left-10 right-4 sm:right-10 h-20 sm:h-24 glass-effect rounded-[2.5rem] sm:rounded-[3.5rem] premium-shadow z-[150] flex items-center justify-around px-2 sm:px-4">
         <NavButton active={view === 'HOME'} onClick={() => setView('HOME')} icon={<svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" /></svg>} />
         <NavButton active={view === 'REPORTS'} onClick={() => setView('REPORTS')} icon={<svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>} />
-        <button onClick={() => { setFormStep(1); setView('ADD_FLOW'); setSelectedSuggestion(null); setInstrumentSuggestions([]); }} className="w-20 h-20 bg-slate-900 rounded-[2.25rem] flex items-center justify-center text-white shadow-2xl relative -top-4 transition-transform active:scale-90"><svg className="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M12 4v16m8-8H4" /></svg></button>
+        <button onClick={() => { setFormStep(1); setView('ADD_FLOW'); setSelectedSuggestion(null); setInstrumentSuggestions([]); }} className="w-16 h-16 sm:w-20 sm:h-20 bg-slate-900 rounded-[1.75rem] sm:rounded-[2.25rem] flex items-center justify-center text-white shadow-2xl relative -top-3 sm:-top-4 transition-transform active:scale-90"><svg className="w-8 h-8 sm:w-10 sm:h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={4} d="M12 4v16m8-8H4" /></svg></button>
         <NavButton active={view === 'AI_HUB'} onClick={() => { setView('AI_HUB'); fetchInsights(); }} icon={<svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>} />
         <NavButton active={view === 'SETTINGS'} onClick={() => setView('SETTINGS')} icon={<svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" /></svg>} />
       </nav>
@@ -1837,7 +1853,7 @@ const App: React.FC = () => {
 };
 
 const NavButton: React.FC<{ active: boolean, onClick: () => void, icon: React.ReactNode }> = ({ active, onClick, icon }) => (
-  <button onClick={onClick} className={`p-5 rounded-[2rem] transition-all duration-300 ${active ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-slate-300'}`}>{icon}</button>
+  <button onClick={onClick} className={`p-3.5 sm:p-5 rounded-[1.25rem] sm:rounded-[2rem] transition-all duration-300 ${active ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-100' : 'text-slate-300'}`}>{icon}</button>
 );
 
 export default App;

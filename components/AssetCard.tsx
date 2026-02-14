@@ -15,6 +15,13 @@ export const AssetCard: React.FC<Props> = ({ type, totalValue, returns, onClick 
   const pctRaw = base > 0 ? (returns / base) * 100 : 0;
   const returnsPercent = Number.isFinite(pctRaw) ? pctRaw.toFixed(1) : '0.0';
   const isZeroValue = Math.round(totalValue) === 0;
+  const valueText = Math.round(totalValue).toLocaleString('en-IN');
+  const valueClass =
+    valueText.length >= 10
+      ? 'text-[clamp(0.74rem,2vw,0.9rem)]'
+      : valueText.length >= 8
+        ? 'text-[clamp(0.82rem,2.2vw,1rem)]'
+        : 'text-[clamp(0.92rem,2.6vw,1.12rem)]';
 
   return (
     <button
@@ -33,10 +40,10 @@ export const AssetCard: React.FC<Props> = ({ type, totalValue, returns, onClick 
         <h3 className="text-slate-600 text-[11px] font-black uppercase tracking-[0.18em] leading-tight">
           {meta.label}
         </h3>
-        <p className={`mt-2 text-[clamp(0.8rem,2.4vw,1rem)] leading-none font-black whitespace-nowrap tabular-nums ${
+        <p className={`mt-2 ${valueClass} leading-none font-black whitespace-nowrap tabular-nums ${
           isZeroValue ? 'text-slate-300' : (returns > 0 ? 'text-emerald-600' : returns < 0 ? 'text-rose-600' : 'text-slate-900')
         }`}>
-          {'\u20B9'}{Math.round(totalValue).toLocaleString('en-IN')}
+          {'\u20B9'}{valueText}
         </p>
       </div>
     </button>

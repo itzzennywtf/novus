@@ -157,7 +157,14 @@ const getFetchTargets = (url: string): string[] => {
   try {
     const parsed = new URL(url);
     if (parsed.hostname === "query1.finance.yahoo.com") {
-      targets.push(`/api/yahoo${parsed.pathname}${parsed.search}`);
+      if (parsed.pathname.startsWith("/v8/finance/chart/")) {
+        const symbol = parsed.pathname.split("/").pop() || "";
+        const range = parsed.searchParams.get("range") || "10y";
+        const interval = parsed.searchParams.get("interval") || "1d";
+        targets.push(`/api/yahoo-chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`);
+      } else if (parsed.pathname === "/v1/finance/search") {
+        targets.push(`/api/yahoo-search${parsed.search}`);
+      }
       if (!isLocalDev) return targets;
     }
   } catch {

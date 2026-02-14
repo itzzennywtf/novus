@@ -52,7 +52,7 @@ type NemotronStreamChunk = {
 };
 
 const MODEL = "nvidia/nemotron-3-nano-30b-a3b";
-const BASE_URLS = ["/api/nvidia/v1"];
+const BASE_URLS = ["/api/nvidia-chat"];
 const API_KEY = import.meta.env.VITE_NVIDIA_API_KEY as string | undefined;
 const MAX_RESPONSE_TOKENS = 1024;
 const LLM_RETRIES = 3;
@@ -181,7 +181,10 @@ const postNemotron = async (
 
   for (const baseUrl of BASE_URLS) {
     try {
-      const resp = await fetch(`${baseUrl}${path}`, {
+      const target = baseUrl === "/api/nvidia-chat"
+        ? `${baseUrl}?path=${encodeURIComponent(path)}`
+        : `${baseUrl}${path}`;
+      const resp = await fetch(target, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
