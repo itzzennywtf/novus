@@ -22,14 +22,22 @@ export default async function handler(req: any, res: any) {
       return;
     }
 
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`;
-    const upstream = await fetch(url, {
-      headers: {
-        Accept: "application/json",
-        "User-Agent": req.headers?.["user-agent"] || "Mozilla/5.0",
-        Referer: "https://finance.yahoo.com/",
-      },
-    });
+    const makeReq = async (host: "query1.finance.yahoo.com" | "query2.finance.yahoo.com") =>
+      await fetch(
+        `https://${host}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`,
+        {
+          headers: {
+            Accept: "application/json",
+            "User-Agent": req.headers?.["user-agent"] || "Mozilla/5.0",
+            Referer: "https://finance.yahoo.com/",
+          },
+        }
+      );
+
+    let upstream = await makeReq("query1.finance.yahoo.com");
+    if (upstream.status === 429) {
+      upstream = await makeReq("query2.finance.yahoo.com");
+    }
 
     const text = await upstream.text();
     if (upstream.status === 429 && cached) {

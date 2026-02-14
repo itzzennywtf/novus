@@ -508,6 +508,19 @@ const fetchYahooSeries = async (symbol: string, range = "10y", interval = "1d"):
   return task;
 };
 
+const fetchYahooSeriesWithFallback = async (symbol: string, preferredRange = "10y"): Promise<PricePoint[]> => {
+  const ranges = Array.from(new Set([preferredRange, "5y", "1y", "6mo"]));
+  let lastError: unknown = null;
+  for (const r of ranges) {
+    try {
+      return await fetchYahooSeries(symbol, r, "1d");
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`No series for ${symbol}`);
+};
+
 const fetchYahooQuote = async (symbol: string): Promise<{ price: number; prevClose?: number }> => {
   const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
   const json = await fetchJson<YahooQuoteResponse>(url);
@@ -645,7 +658,7 @@ const fetchStockLikeData = async (name: string, purchaseDate: string, lite = fal
           trend10Y: [],
         };
       }
-      const series = await fetchYahooSeries(symbol, range, "1d");
+      const series = await fetchYahooSeriesWithFallback(symbol, range);
       return summarizeSeries(series, purchaseDate);
     } catch {
       // Try next symbol candidate.
@@ -749,7 +762,23 @@ export const fetchMarketData = async (name: string, type: string, purchaseDate: 
       return createFallbackData(`fd:${name}`);
     }
     if (options?.fixedSymbol) {
-      const series = await fetchYahooSeries(options.fixedSymbol, options?.lite ? "6mo" : "10y", "1d");
+      if (options?.lite) {
+        const quote = await fetchYahooQuote(options.fixedSymbol);
+        const current = quote.price;
+        const prev = quote.prevClose || current;
+        return {
+          historicalPrice: round2(prev),
+          currentPrice: round2(current),
+          startOfDay: round2(prev),
+          startOfWeek: round2(prev),
+          startOfMonth: round2(prev),
+          trend6M: [],
+          trend1Y: [],
+          trend5Y: [],
+          trend10Y: [],
+        };
+      }
+      const series = await fetchYahooSeriesWithFallback(options.fixedSymbol, "10y");
       return summarizeSeries(series, purchaseDate);
     }
     return await fetchStockLikeData(name, purchaseDate, options?.lite);
