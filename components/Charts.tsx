@@ -54,8 +54,8 @@ const BarTooltip = ({ active, payload, label }: { active?: boolean; payload?: an
 };
 
 export const PerformanceLineChart: React.FC<{ data: any[], color?: string, height?: number }> = ({ data, color = "#6366F1", height = 200 }) => (
-  <div style={{ height: `${height}px` }} className="w-full max-w-full">
-    <ResponsiveContainer width="100%" height="100%">
+  <div style={{ height: `${height}px`, minHeight: `${height}px` }} className="w-full max-w-full min-w-0">
+    <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
       <AreaChart data={data}>
         <defs>
           <linearGradient id="colorArea" x1="0" y1="0" x2="0" y2="1">
@@ -80,8 +80,8 @@ export const GrowthLineChart: React.FC<{ data?: any[], color?: string, height?: 
     { name: '1Y', val: 55 }, { name: '3Y', val: 78 }, { name: '5Y', val: 110 }
   ];
   return (
-  <div style={{ height: `${height}px` }} className="w-full max-w-full">
-    <ResponsiveContainer width="100%" height="100%">
+  <div style={{ height: `${height}px`, minHeight: `${height}px` }} className="w-full max-w-full min-w-0">
+    <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
       <AreaChart data={data || defaultData}>
         <XAxis dataKey="name" hide />
         <Tooltip
@@ -95,8 +95,8 @@ export const GrowthLineChart: React.FC<{ data?: any[], color?: string, height?: 
 };
 
 export const CustomPieChart: React.FC<{ data: { name: string, value: number, color: string }[], height?: number }> = ({ data, height = 250 }) => (
-  <div style={{ height: `${height}px` }} className="w-full max-w-full">
-    <ResponsiveContainer width="100%" height="100%">
+  <div style={{ height: `${height}px`, minHeight: `${height}px` }} className="w-full max-w-full min-w-0">
+    <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
       <PieChart>
         <Pie
           data={data}
@@ -120,8 +120,8 @@ export const CustomPieChart: React.FC<{ data: { name: string, value: number, col
 );
 
 export const ProfitBarChart: React.FC<{ data: any[], height?: number }> = ({ data, height = 200 }) => (
-  <div style={{ height: `${height}px` }} className="w-full max-w-full">
-    <ResponsiveContainer width="100%" height="100%">
+  <div style={{ height: `${height}px`, minHeight: `${height}px` }} className="w-full max-w-full min-w-0">
+    <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
       <BarChart data={data}>
         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
         <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 10, fill: '#94a3b8' }} />
@@ -140,8 +140,8 @@ export const ProfitBarChart: React.FC<{ data: any[], height?: number }> = ({ dat
 );
 
 export const ComparisonBarChart: React.FC<{ data: any[], height?: number }> = ({ data, height = 200 }) => (
-  <div style={{ height: `${height}px` }} className="w-full max-w-full">
-    <ResponsiveContainer width="100%" height="100%">
+  <div style={{ height: `${height}px`, minHeight: `${height}px` }} className="w-full max-w-full min-w-0">
+    <ResponsiveContainer width="100%" height="100%" minWidth={10} minHeight={10}>
       <BarChart data={data}>
         <XAxis dataKey="name" hide />
         <Tooltip

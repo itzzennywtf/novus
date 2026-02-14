@@ -32,6 +32,7 @@ export interface MfSipSnapshot {
 
 interface FetchMarketOptions {
   fixedSymbol?: string;
+  lite?: boolean;
 }
 
 type PricePoint = { ts: number; price: number };
@@ -39,6 +40,7 @@ type PricePoint = { ts: number; price: number };
 const OUNCE_TO_GRAM = 31.1034768;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 12000;
+const YAHOO_SERIES_CACHE_MS = 60_000;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -150,9 +152,7 @@ const parseJsonFromText = <T>(text: string): T => {
 
 const getFetchTargets = (url: string): string[] => {
   const targets: string[] = [];
-  const isLocalDev =
-    typeof window !== "undefined" &&
-    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
+  const isLocalDev = import.meta.env.DEV;
 
   try {
     const parsed = new URL(url);
@@ -161,11 +161,20 @@ const getFetchTargets = (url: string): string[] => {
         const symbol = parsed.pathname.split("/").pop() || "";
         const range = parsed.searchParams.get("range") || "10y";
         const interval = parsed.searchParams.get("interval") || "1d";
-        targets.push(`/api/yahoo-chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`);
+        if (isLocalDev) {
+          targets.push(`/api/yahoo/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`);
+        } else {
+          targets.push(`/api/yahoo-chart?symbol=${encodeURIComponent(symbol)}&range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`);
+        }
       } else if (parsed.pathname === "/v1/finance/search") {
-        targets.push(`/api/yahoo-search${parsed.search}`);
+        if (isLocalDev) {
+          targets.push(`/api/yahoo/v1/finance/search${parsed.search}`);
+        } else {
+          targets.push(`/api/yahoo-search${parsed.search}`);
+        }
       }
-      if (!isLocalDev) return targets;
+      // For Yahoo, never fall back to browser-direct URLs (CORS blocked/noisy).
+      return targets;
     }
   } catch {
     // Keep external URL-only fallbacks.
@@ -182,6 +191,7 @@ const getFetchTargets = (url: string): string[] => {
 };
 
 const fetchJson = async <T>(url: string): Promise<T> => {
+  const isYahoo = url.includes("query1.finance.yahoo.com");
   const targets = getFetchTargets(url);
 
   let lastError: unknown = null;
@@ -198,6 +208,10 @@ const fetchJson = async <T>(url: string): Promise<T> => {
   }
 
   // Final fallback for relays that wrap the payload in `contents`.
+  // Skip this for Yahoo to avoid CORS/500 noise in production.
+  if (isYahoo) {
+    throw lastError instanceof Error ? lastError : new Error(`Unable to fetch ${url}`);
+  }
   try {
     const wrappedUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
     const resp = await fetchWithTimeout(wrappedUrl);
@@ -211,6 +225,9 @@ const fetchJson = async <T>(url: string): Promise<T> => {
 
   throw lastError instanceof Error ? lastError : new Error(`Unable to fetch ${url}`);
 };
+
+const yahooSeriesCache = new Map<string, { ts: number; data: PricePoint[] }>();
+const yahooSeriesInflight = new Map<string, Promise<PricePoint[]>>();
 
 interface YahooChartResponse {
   chart?: {
@@ -337,27 +354,48 @@ const scoreSchemeMatch = (query: string, schemeName: string): number => {
   return score;
 };
 
-const fetchYahooSeries = async (symbol: string): Promise<PricePoint[]> => {
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=10y&interval=1d`;
-  const json = await fetchJson<YahooChartResponse>(url);
-  const result = json.chart?.result?.[0];
-  const ts = result?.timestamp || [];
-  const close = result?.indicators?.quote?.[0]?.close || [];
-
-  const series: PricePoint[] = [];
-  for (let i = 0; i < ts.length; i += 1) {
-    const price = close[i];
-    if (typeof price === "number" && Number.isFinite(price)) {
-      series.push({ ts: ts[i] * 1000, price });
-    }
+const fetchYahooSeries = async (symbol: string, range = "10y", interval = "1d"): Promise<PricePoint[]> => {
+  const key = `${symbol.toUpperCase()}|${range}|${interval}`;
+  const cached = yahooSeriesCache.get(key);
+  if (cached && Date.now() - cached.ts <= YAHOO_SERIES_CACHE_MS) {
+    return cached.data;
   }
+  const inflight = yahooSeriesInflight.get(key);
+  if (inflight) return inflight;
 
-  if (!series.length) throw new Error(`No data for symbol ${symbol}`);
-  return series;
+  const task = (async () => {
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${encodeURIComponent(range)}&interval=${encodeURIComponent(interval)}`;
+    try {
+      const json = await fetchJson<YahooChartResponse>(url);
+      const result = json.chart?.result?.[0];
+      const ts = result?.timestamp || [];
+      const close = result?.indicators?.quote?.[0]?.close || [];
+
+      const series: PricePoint[] = [];
+      for (let i = 0; i < ts.length; i += 1) {
+        const price = close[i];
+        if (typeof price === "number" && Number.isFinite(price)) {
+          series.push({ ts: ts[i] * 1000, price });
+        }
+      }
+
+      if (!series.length) throw new Error(`No data for symbol ${symbol}`);
+      yahooSeriesCache.set(key, { ts: Date.now(), data: series });
+      return series;
+    } catch (error) {
+      const stale = yahooSeriesCache.get(key);
+      if (stale?.data?.length) return stale.data;
+      throw error;
+    } finally {
+      yahooSeriesInflight.delete(key);
+    }
+  })();
+  yahooSeriesInflight.set(key, task);
+  return task;
 };
 
 const fetchYahooLatestPrice = async (symbol: string): Promise<number> => {
-  const series = await fetchYahooSeries(symbol);
+  const series = await fetchYahooSeries(symbol, "1mo", "1d");
   return round2(series[series.length - 1].price);
 };
 
@@ -442,8 +480,9 @@ const getStockCandidates = (name: string): string[] => {
   return [cleaned, `${cleaned}.NS`, `${cleaned}.BO`];
 };
 
-const fetchStockLikeData = async (name: string, purchaseDate: string): Promise<MarketData> => {
+const fetchStockLikeData = async (name: string, purchaseDate: string, lite = false): Promise<MarketData> => {
   const candidates = getStockCandidates(name);
+  const range = lite ? "6mo" : "10y";
   try {
     const resolved = await resolveYahooSymbol(name, ["EQUITY"]);
     if (resolved && !candidates.includes(resolved)) candidates.unshift(resolved);
@@ -453,7 +492,7 @@ const fetchStockLikeData = async (name: string, purchaseDate: string): Promise<M
 
   for (const symbol of candidates) {
     try {
-      const series = await fetchYahooSeries(symbol);
+      const series = await fetchYahooSeries(symbol, range, "1d");
       return summarizeSeries(series, purchaseDate);
     } catch {
       // Try next symbol candidate.
@@ -557,10 +596,10 @@ export const fetchMarketData = async (name: string, type: string, purchaseDate: 
       return createFallbackData(`fd:${name}`);
     }
     if (options?.fixedSymbol) {
-      const series = await fetchYahooSeries(options.fixedSymbol);
+      const series = await fetchYahooSeries(options.fixedSymbol, options?.lite ? "6mo" : "10y", "1d");
       return summarizeSeries(series, purchaseDate);
     }
-    return await fetchStockLikeData(name, purchaseDate);
+    return await fetchStockLikeData(name, purchaseDate, options?.lite);
   } catch (error) {
     console.error("Market data fallback:", error);
     return createFallbackData(`${type}:${name}`);

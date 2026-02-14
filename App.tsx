@@ -117,6 +117,16 @@ const App: React.FC = () => {
   const investmentsRef = useRef<Investment[]>(investments);
   const aiChatScrollRef = useRef<HTMLDivElement | null>(null);
   const speechRecognitionRef = useRef<any>(null);
+  const trendStaticFingerprint = useMemo(
+    () =>
+      investments
+        .map(
+          (i) =>
+            `${i.id}|${i.type}|${i.purchaseDate}|${i.investedAmount}|${i.quantity}|${i.trackingSymbol || i.name}|${i.isSip ? 1 : 0}|${i.sipAmount || 0}|${i.sipDay || 0}`
+        )
+        .join("||"),
+    [investments]
+  );
 
   const hydrateFromSupabase = async () => {
     setSupabaseError('');
@@ -236,7 +246,7 @@ const App: React.FC = () => {
             }
             const searchName = item.type === AssetType.GOLD ? '24K Gold 1g India' : (fixedSymbol || item.name);
             const effectiveDate = item.type === AssetType.GOLD ? new Date().toISOString().split('T')[0] : item.purchaseDate;
-            const market = await fetchMarketData(searchName, item.type, effectiveDate, { fixedSymbol });
+            const market = await fetchMarketData(searchName, item.type, effectiveDate, { fixedSymbol, lite: true });
             const previousUnitPrice = item.quantity > 0 ? item.currentValue / item.quantity : 0;
             const nextUnitPrice = market.currentPrice;
             const ratio = previousUnitPrice > 0 ? nextUnitPrice / previousUnitPrice : 1;
@@ -271,7 +281,7 @@ const App: React.FC = () => {
     };
 
     refreshMarketValues();
-    const id = window.setInterval(refreshMarketValues, 30000);
+    const id = window.setInterval(refreshMarketValues, 120000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
@@ -385,7 +395,7 @@ const App: React.FC = () => {
 
     loadAssetTrend();
     return () => { cancelled = true; };
-  }, [view, selectedAsset, investments, isAuthenticated]);
+  }, [view, selectedAsset, trendStaticFingerprint, isAuthenticated]);
 
   useEffect(() => {
     if (!isAuthenticated) return;
@@ -480,7 +490,7 @@ const App: React.FC = () => {
 
     loadPortfolioTrend();
     return () => { cancelled = true; };
-  }, [investments, isAuthenticated]);
+  }, [trendStaticFingerprint, isAuthenticated]);
 
   useEffect(() => {
     if (view !== 'ADD_FLOW' || formStep !== 2) return;
@@ -530,6 +540,8 @@ const App: React.FC = () => {
   };
   const formatOneDecimal = (value: number) =>
     value.toLocaleString('en-IN', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  const formatNav = (value: number) =>
+    value.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
   const amountTextClass = (value: number, mode: 'hero' | 'section' | 'holding' = 'section') => {
     const len = formatOneDecimal(value).length;
     if (mode === 'hero') {
@@ -1190,6 +1202,11 @@ const App: React.FC = () => {
                 <p className={`text-[10px] font-black uppercase tracking-widest mt-1 ${item.currentValue >= item.investedAmount ? 'text-emerald-500' : 'text-rose-600'}`}>
                   {item.currentValue >= item.investedAmount ? '▲' : '▼'} {((item.currentValue - item.investedAmount) / item.investedAmount * 100).toFixed(1)}%
                 </p>
+                {item.type === AssetType.MUTUAL_FUNDS && item.quantity > 0 && (
+                  <p className="text-[9px] font-black text-slate-400 mt-1">
+                    NAV {profile.currency}{formatNav(item.currentValue / item.quantity)}
+                  </p>
+                )}
               </div>
             </button>
           ))}
@@ -1204,6 +1221,13 @@ const App: React.FC = () => {
     const gain = item.currentValue - item.investedAmount;
     const daily = item.priceStartOfDay ? (item.currentValue - (item.priceStartOfDay * item.quantity)) : 0;
     const monthly = item.priceStartOfMonth ? (item.currentValue - (item.priceStartOfMonth * item.quantity)) : 0;
+    const isMf = item.type === AssetType.MUTUAL_FUNDS;
+    const currentNav = item.quantity > 0 ? item.currentValue / item.quantity : 0;
+    const buyNav = item.purchasePrice || 0;
+    const navDayBase = item.priceStartOfDay || 0;
+    const navMonthBase = item.priceStartOfMonth || 0;
+    const navDayChangePct = navDayBase > 0 ? ((currentNav - navDayBase) / navDayBase) * 100 : 0;
+    const navMonthChangePct = navMonthBase > 0 ? ((currentNav - navMonthBase) / navMonthBase) * 100 : 0;
     const trendData = trendRange === '6M'
       ? holdingTrendData.trend6M
       : trendRange === '1Y'
@@ -1270,6 +1294,34 @@ const App: React.FC = () => {
               <p className={`font-black text-xl whitespace-nowrap tabular-nums ${monthly >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>{monthly >= 0 ? '+' : '-'}{profile.currency}{Math.round(Math.abs(monthly)).toLocaleString('en-IN')}</p>
            </div>
         </div>
+
+        {isMf && (
+          <div className="bg-white p-6 rounded-[3rem] premium-shadow border border-slate-50">
+            <p className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-4">NAV Snapshot</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-50 rounded-2xl px-4 py-3">
+                <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">Current NAV</p>
+                <p className="text-sm font-black text-slate-900 mt-1">{profile.currency}{formatNav(currentNav)}</p>
+              </div>
+              <div className="bg-slate-50 rounded-2xl px-4 py-3">
+                <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">{item.isSip ? 'Avg Buy NAV' : 'Buy NAV'}</p>
+                <p className="text-sm font-black text-slate-900 mt-1">{profile.currency}{formatNav(buyNav)}</p>
+              </div>
+              <div className="bg-slate-50 rounded-2xl px-4 py-3">
+                <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">NAV 1D</p>
+                <p className={`text-sm font-black mt-1 ${navDayChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {navDayChangePct >= 0 ? '+' : ''}{navDayChangePct.toFixed(2)}%
+                </p>
+              </div>
+              <div className="bg-slate-50 rounded-2xl px-4 py-3">
+                <p className="text-[8px] font-black uppercase tracking-wider text-slate-400">NAV 1M</p>
+                <p className={`text-sm font-black mt-1 ${navMonthChangePct >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  {navMonthChangePct >= 0 ? '+' : ''}{navMonthChangePct.toFixed(2)}%
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-white p-8 rounded-[4rem] premium-shadow border border-slate-50">
           <div className="flex justify-between items-center mb-8 ml-2">
