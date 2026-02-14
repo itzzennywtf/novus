@@ -24,4 +24,3 @@ export default async function handler(req: any, res: any) {
     res.status(502).json({ error: "Yahoo chart proxy failed", detail: String(error?.message || error) });
   }
 }
-

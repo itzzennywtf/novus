@@ -172,6 +172,12 @@ const getFetchTargets = (url: string): string[] => {
         } else {
           targets.push(`/api/yahoo-search${parsed.search}`);
         }
+      } else if (parsed.pathname === "/v7/finance/quote") {
+        if (isLocalDev) {
+          targets.push(`/api/yahoo/v7/finance/quote${parsed.search}`);
+        } else {
+          targets.push(`/api/yahoo-quote${parsed.search}`);
+        }
       }
       // For Yahoo, never fall back to browser-direct URLs (CORS blocked/noisy).
       return targets;
@@ -228,6 +234,8 @@ const fetchJson = async <T>(url: string): Promise<T> => {
 
 const yahooSeriesCache = new Map<string, { ts: number; data: PricePoint[] }>();
 const yahooSeriesInflight = new Map<string, Promise<PricePoint[]>>();
+const yahooSearchCache = new Map<string, { ts: number; data: YahooSearchResponse }>();
+const SEARCH_CACHE_MS = 3 * 60 * 1000;
 
 interface YahooChartResponse {
   chart?: {
@@ -248,6 +256,16 @@ interface YahooSearchResponse {
     quoteType?: string;
     exchange?: string;
   }>;
+}
+
+interface YahooQuoteResponse {
+  quoteResponse?: {
+    result?: Array<{
+      symbol?: string;
+      regularMarketPrice?: number;
+      regularMarketPreviousClose?: number;
+    }>;
+  };
 }
 
 interface MfScheme {
@@ -394,17 +412,38 @@ const fetchYahooSeries = async (symbol: string, range = "10y", interval = "1d"):
   return task;
 };
 
+const fetchYahooQuote = async (symbol: string): Promise<{ price: number; prevClose?: number }> => {
+  const url = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbol)}`;
+  const json = await fetchJson<YahooQuoteResponse>(url);
+  const row = json.quoteResponse?.result?.[0];
+  const price = Number(row?.regularMarketPrice || 0);
+  if (!Number.isFinite(price) || price <= 0) throw new Error(`No quote for ${symbol}`);
+  const prevClose = Number(row?.regularMarketPreviousClose || 0);
+  return { price: round2(price), prevClose: Number.isFinite(prevClose) && prevClose > 0 ? round2(prevClose) : undefined };
+};
+
 const fetchYahooLatestPrice = async (symbol: string): Promise<number> => {
-  const series = await fetchYahooSeries(symbol, "1mo", "1d");
-  return round2(series[series.length - 1].price);
+  try {
+    const q = await fetchYahooQuote(symbol);
+    return q.price;
+  } catch {
+    const series = await fetchYahooSeries(symbol, "1mo", "1d");
+    return round2(series[series.length - 1].price);
+  }
 };
 
 const resolveYahooSymbol = async (query: string, preferredTypes: string[] = []): Promise<string | null> => {
   const cleaned = query.trim();
   if (!cleaned) return null;
 
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(cleaned)}&quotesCount=8&newsCount=0`;
-  const json = await fetchJson<YahooSearchResponse>(url);
+  const cacheKey = `s:${cleaned.toUpperCase()}:8`;
+  const cached = yahooSearchCache.get(cacheKey);
+  const json = cached && Date.now() - cached.ts <= SEARCH_CACHE_MS
+    ? cached.data
+    : await fetchJson<YahooSearchResponse>(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(cleaned)}&quotesCount=8&newsCount=0`);
+  if (!cached || Date.now() - cached.ts > SEARCH_CACHE_MS) {
+    yahooSearchCache.set(cacheKey, { ts: Date.now(), data: json });
+  }
   const quotes = json.quotes || [];
 
   if (preferredTypes.length > 0) {
@@ -434,8 +473,14 @@ const resolveYahooSymbol = async (query: string, preferredTypes: string[] = []):
 const resolveYahooTopSymbols = async (query: string, preferredTypes: string[] = [], limit = 3): Promise<string[]> => {
   const cleaned = query.trim();
   if (!cleaned) return [];
-  const url = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(cleaned)}&quotesCount=12&newsCount=0`;
-  const json = await fetchJson<YahooSearchResponse>(url);
+  const cacheKey = `s:${cleaned.toUpperCase()}:12`;
+  const cached = yahooSearchCache.get(cacheKey);
+  const json = cached && Date.now() - cached.ts <= SEARCH_CACHE_MS
+    ? cached.data
+    : await fetchJson<YahooSearchResponse>(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(cleaned)}&quotesCount=12&newsCount=0`);
+  if (!cached || Date.now() - cached.ts > SEARCH_CACHE_MS) {
+    yahooSearchCache.set(cacheKey, { ts: Date.now(), data: json });
+  }
   const quotes = json.quotes || [];
 
   const byType = preferredTypes.length === 0
@@ -492,6 +537,22 @@ const fetchStockLikeData = async (name: string, purchaseDate: string, lite = fal
 
   for (const symbol of candidates) {
     try {
+      if (lite) {
+        const quote = await fetchYahooQuote(symbol);
+        const current = quote.price;
+        const prev = quote.prevClose || current;
+        return {
+          historicalPrice: round2(prev),
+          currentPrice: round2(current),
+          startOfDay: round2(prev),
+          startOfWeek: round2(prev),
+          startOfMonth: round2(prev),
+          trend6M: [],
+          trend1Y: [],
+          trend5Y: [],
+          trend10Y: [],
+        };
+      }
       const series = await fetchYahooSeries(symbol, range, "1d");
       return summarizeSeries(series, purchaseDate);
     } catch {
@@ -620,11 +681,22 @@ export const searchInstruments = async (query: string, type: AssetType): Promise
 
   if (type === AssetType.STOCKS) {
     const cleanedQuery = q.replace(/[-_/.,]+/g, " ").replace(/\s+/g, " ").trim();
-    let symbols = await resolveYahooTopSymbols(cleanedQuery || q, ["EQUITY"], 3);
-    if (!symbols.length && cleanedQuery && cleanedQuery !== q) {
-      symbols = await resolveYahooTopSymbols(q, ["EQUITY"], 3);
+    let symbols: string[] = [];
+    try {
+      symbols = await resolveYahooTopSymbols(cleanedQuery || q, ["EQUITY"], 3);
+      if (!symbols.length && cleanedQuery && cleanedQuery !== q) {
+        symbols = await resolveYahooTopSymbols(q, ["EQUITY"], 3);
+      }
+    } catch {
+      symbols = [];
     }
-    const priced = await Promise.all(
+
+    if (!symbols.length) {
+      const guess = (cleanedQuery || q).toUpperCase().replace(/[^A-Z0-9]/g, "");
+      if (guess) symbols = [guess.includes(".") ? guess : `${guess}.NS`];
+    }
+
+    const pricedSettled = await Promise.allSettled(
       symbols.map(async (symbol) => ({
         label: symbol,
         symbol,
@@ -632,7 +704,13 @@ export const searchInstruments = async (query: string, type: AssetType): Promise
         type: "STOCK" as const,
       }))
     );
-    return priced;
+
+    const priced = pricedSettled
+      .filter((r): r is PromiseFulfilledResult<InstrumentSuggestion> => r.status === "fulfilled")
+      .map((r) => r.value);
+
+    if (priced.length) return priced.slice(0, 3);
+    return symbols.slice(0, 3).map((symbol) => ({ label: symbol, symbol, currentPrice: 0, type: "STOCK" as const }));
   }
 
   if (type === AssetType.MUTUAL_FUNDS) {
