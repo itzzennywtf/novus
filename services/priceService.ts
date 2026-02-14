@@ -41,6 +41,7 @@ const OUNCE_TO_GRAM = 31.1034768;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 12000;
 const YAHOO_SERIES_CACHE_MS = 60_000;
+const YAHOO_LOCAL_CACHE_PREFIX = "novus_yahoo_series_v1:";
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -237,6 +238,54 @@ const yahooSeriesInflight = new Map<string, Promise<PricePoint[]>>();
 const yahooSearchCache = new Map<string, { ts: number; data: YahooSearchResponse }>();
 const SEARCH_CACHE_MS = 3 * 60 * 1000;
 
+const getYahooSeriesTtl = (range: string): number => {
+  if (range === "10y") return 24 * 60 * 60 * 1000;
+  if (range === "5y") return 12 * 60 * 60 * 1000;
+  if (range === "1y") return 3 * 60 * 60 * 1000;
+  if (range === "6mo") return 60 * 60 * 1000;
+  return 15 * 60 * 1000;
+};
+
+const readSeriesFromLocal = (key: string, ttlMs: number): PricePoint[] | null => {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(`${YAHOO_LOCAL_CACHE_PREFIX}${key}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { ts?: number; data?: PricePoint[] };
+    if (!parsed?.ts || !Array.isArray(parsed?.data)) return null;
+    if (Date.now() - parsed.ts > ttlMs) return null;
+    if (!parsed.data.length) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+};
+
+const writeSeriesToLocal = (key: string, data: PricePoint[]) => {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      `${YAHOO_LOCAL_CACHE_PREFIX}${key}`,
+      JSON.stringify({ ts: Date.now(), data })
+    );
+  } catch {
+    // ignore storage quota errors
+  }
+};
+
+const STOCK_SYMBOL_ALIASES: Record<string, string> = {
+  HDFC: "HDFCBANK.NS",
+  HDFCBANK: "HDFCBANK.NS",
+  RELIANCE: "RELIANCE.NS",
+  INFY: "INFY.NS",
+  TCS: "TCS.NS",
+  SBIN: "SBIN.NS",
+  ICICIBANK: "ICICIBANK.NS",
+  ITC: "ITC.NS",
+  LT: "LT.NS",
+  AXISBANK: "AXISBANK.NS",
+};
+
 interface YahooChartResponse {
   chart?: {
     result?: Array<{
@@ -374,9 +423,15 @@ const scoreSchemeMatch = (query: string, schemeName: string): number => {
 
 const fetchYahooSeries = async (symbol: string, range = "10y", interval = "1d"): Promise<PricePoint[]> => {
   const key = `${symbol.toUpperCase()}|${range}|${interval}`;
+  const ttlMs = getYahooSeriesTtl(range);
   const cached = yahooSeriesCache.get(key);
-  if (cached && Date.now() - cached.ts <= YAHOO_SERIES_CACHE_MS) {
+  if (cached && Date.now() - cached.ts <= Math.max(YAHOO_SERIES_CACHE_MS, ttlMs)) {
     return cached.data;
+  }
+  const localCached = readSeriesFromLocal(key, ttlMs);
+  if (localCached) {
+    yahooSeriesCache.set(key, { ts: Date.now(), data: localCached });
+    return localCached;
   }
   const inflight = yahooSeriesInflight.get(key);
   if (inflight) return inflight;
@@ -399,10 +454,13 @@ const fetchYahooSeries = async (symbol: string, range = "10y", interval = "1d"):
 
       if (!series.length) throw new Error(`No data for symbol ${symbol}`);
       yahooSeriesCache.set(key, { ts: Date.now(), data: series });
+      writeSeriesToLocal(key, series);
       return series;
     } catch (error) {
       const stale = yahooSeriesCache.get(key);
       if (stale?.data?.length) return stale.data;
+      const staleLocal = readSeriesFromLocal(key, 14 * 24 * 60 * 60 * 1000);
+      if (staleLocal?.length) return staleLocal;
       throw error;
     } finally {
       yahooSeriesInflight.delete(key);
@@ -521,6 +579,8 @@ const summarizeSeries = (series: PricePoint[], purchaseDate: string): MarketData
 const getStockCandidates = (name: string): string[] => {
   const cleaned = name.trim().toUpperCase().replace(/\s+/g, "");
   if (!cleaned) return [];
+  const aliased = STOCK_SYMBOL_ALIASES[cleaned];
+  if (aliased) return [aliased];
   if (cleaned.includes("=") || cleaned.includes(".")) return [cleaned];
   return [cleaned, `${cleaned}.NS`, `${cleaned}.BO`];
 };
@@ -693,7 +753,10 @@ export const searchInstruments = async (query: string, type: AssetType): Promise
 
     if (!symbols.length) {
       const guess = (cleanedQuery || q).toUpperCase().replace(/[^A-Z0-9]/g, "");
-      if (guess) symbols = [guess.includes(".") ? guess : `${guess}.NS`];
+      if (guess) {
+        const aliased = STOCK_SYMBOL_ALIASES[guess];
+        symbols = [aliased || (guess.includes(".") ? guess : `${guess}.NS`)];
+      }
     }
 
     const pricedSettled = await Promise.allSettled(
