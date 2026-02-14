@@ -399,6 +399,7 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!isAuthenticated) return;
+    if (view !== 'REPORTS') return;
     if (investments.length === 0) {
       setPortfolioTrendData({
         current6M: [], invested6M: [], profit6M: [],
@@ -490,7 +491,7 @@ const App: React.FC = () => {
 
     loadPortfolioTrend();
     return () => { cancelled = true; };
-  }, [trendStaticFingerprint, isAuthenticated]);
+  }, [trendStaticFingerprint, isAuthenticated, view]);
 
   useEffect(() => {
     if (view !== 'ADD_FLOW' || formStep !== 2) return;

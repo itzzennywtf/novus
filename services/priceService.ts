@@ -42,6 +42,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT_MS = 12000;
 const YAHOO_SERIES_CACHE_MS = 60_000;
 const YAHOO_LOCAL_CACHE_PREFIX = "novus_yahoo_series_v1:";
+const YAHOO_MIN_GAP_MS = 400;
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -151,6 +152,25 @@ const parseJsonFromText = <T>(text: string): T => {
   }
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+let yahooGate: Promise<void> = Promise.resolve();
+let lastYahooHitAt = 0;
+
+const runYahooLimited = async <T>(work: () => Promise<T>): Promise<T> => {
+  const prev = yahooGate;
+  let release!: () => void;
+  yahooGate = new Promise<void>((resolve) => { release = resolve; });
+  await prev;
+  const wait = Math.max(0, YAHOO_MIN_GAP_MS - (Date.now() - lastYahooHitAt));
+  if (wait > 0) await sleep(wait);
+  try {
+    return await work();
+  } finally {
+    lastYahooHitAt = Date.now();
+    release();
+  }
+};
+
 const getFetchTargets = (url: string): string[] => {
   const targets: string[] = [];
   const isLocalDev = import.meta.env.DEV;
@@ -204,13 +224,23 @@ const fetchJson = async <T>(url: string): Promise<T> => {
   let lastError: unknown = null;
 
   for (const target of targets) {
-    try {
-      const resp = await fetchWithTimeout(target);
-      if (!resp.ok) throw new Error(`HTTP ${resp.status} for ${target}`);
-      const text = await resp.text();
-      return parseJsonFromText<T>(text);
-    } catch (error) {
-      lastError = error;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const doFetch = () => fetchWithTimeout(target);
+        const resp = isYahoo ? await runYahooLimited(doFetch) : await doFetch();
+        if (!resp.ok) {
+          if (isYahoo && resp.status === 429 && attempt < 2) {
+            await sleep(350 * (attempt + 1));
+            continue;
+          }
+          throw new Error(`HTTP ${resp.status} for ${target}`);
+        }
+        const text = await resp.text();
+        return parseJsonFromText<T>(text);
+      } catch (error) {
+        lastError = error;
+        if (!(isYahoo && attempt < 2)) break;
+      }
     }
   }
 
