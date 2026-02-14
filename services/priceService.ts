@@ -19,6 +19,17 @@ export interface InstrumentSuggestion {
   type: "STOCK" | "MUTUAL_FUND";
 }
 
+export interface MfSipSnapshot {
+  investedAmount: number;
+  quantity: number;
+  currentPrice: number;
+  currentValue: number;
+  avgPurchasePrice: number;
+  startOfDay?: number;
+  startOfWeek?: number;
+  startOfMonth?: number;
+}
+
 interface FetchMarketOptions {
   fixedSymbol?: string;
 }
@@ -139,11 +150,15 @@ const parseJsonFromText = <T>(text: string): T => {
 
 const getFetchTargets = (url: string): string[] => {
   const targets: string[] = [];
+  const isLocalDev =
+    typeof window !== "undefined" &&
+    (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1");
 
   try {
     const parsed = new URL(url);
     if (parsed.hostname === "query1.finance.yahoo.com") {
       targets.push(`/api/yahoo${parsed.pathname}${parsed.search}`);
+      if (!isLocalDev) return targets;
     }
   } catch {
     // Keep external URL-only fallbacks.
@@ -215,6 +230,105 @@ interface MfScheme {
   schemeCode: number | string;
   schemeName: string;
 }
+
+const parseMfNavSeries = (rows: Array<{ date: string; nav: string }>): PricePoint[] =>
+  rows
+    .map((r) => {
+      const parts = r.date.split("-");
+      if (parts.length !== 3) return null;
+      const ts = Date.UTC(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+      const nav = Number(r.nav);
+      if (!Number.isFinite(ts) || !Number.isFinite(nav)) return null;
+      return { ts, price: nav } as PricePoint;
+    })
+    .filter((v): v is PricePoint => Boolean(v))
+    .sort((a, b) => a.ts - b.ts);
+
+const findPriceOnOrBefore = (series: PricePoint[], targetTs: number): number => {
+  if (!series.length) return 0;
+  let lo = 0;
+  let hi = series.length - 1;
+  let idx = -1;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (series[mid].ts <= targetTs) {
+      idx = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  if (idx >= 0) return series[idx].price;
+  return series[0].price;
+};
+
+const daysInMonthUtc = (year: number, monthZeroBased: number): number =>
+  new Date(Date.UTC(year, monthZeroBased + 1, 0)).getUTCDate();
+
+const buildSipInstallmentDates = (startDate: string, sipDay: number): number[] => {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime())) return [];
+  const today = new Date();
+  const todayUtc = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
+  const safeDay = Math.max(1, Math.min(28, Math.floor(sipDay || 1)));
+  const out: number[] = [];
+
+  let y = start.getUTCFullYear();
+  let m = start.getUTCMonth();
+  const endY = today.getUTCFullYear();
+  const endM = today.getUTCMonth();
+
+  while (y < endY || (y === endY && m <= endM)) {
+    const dim = daysInMonthUtc(y, m);
+    const day = Math.min(safeDay, dim);
+    const ts = Date.UTC(y, m, day);
+    if (ts >= start.getTime() && ts <= todayUtc) out.push(ts);
+    m += 1;
+    if (m > 11) {
+      m = 0;
+      y += 1;
+    }
+  }
+
+  return out;
+};
+
+const normalizeSearchText = (value: string): string =>
+  value.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+const tokenizeSearchText = (value: string): string[] =>
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+const scoreSchemeMatch = (query: string, schemeName: string): number => {
+  const qNorm = normalizeSearchText(query);
+  const nNorm = normalizeSearchText(schemeName);
+  const qTokens = tokenizeSearchText(query);
+  const nTokens = tokenizeSearchText(schemeName);
+  if (!qNorm || !nNorm) return 0;
+
+  let score = 0;
+
+  if (nNorm === qNorm) score += 120;
+  if (nNorm.startsWith(qNorm)) score += 90;
+  if (nNorm.includes(qNorm)) score += 70;
+
+  if (qTokens.length) {
+    let tokenHits = 0;
+    for (const qt of qTokens) {
+      if (nTokens.some((nt) => nt.startsWith(qt) || nt.includes(qt))) tokenHits += 1;
+    }
+    score += tokenHits * 20;
+  }
+
+  // Small tie-breaker: prefer shorter/more precise scheme names.
+  score -= Math.min(25, Math.floor(schemeName.length / 12));
+  return score;
+};
 
 const fetchYahooSeries = async (symbol: string): Promise<PricePoint[]> => {
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=10y&interval=1d`;
@@ -347,22 +461,51 @@ const fetchMutualFundData = async (name: string, purchaseDate: string): Promise<
   if (!asCode) throw new Error("Mutual fund tracking expects mfapi scheme code");
   const url = `https://api.mfapi.in/mf/${asCode}`;
   const json = await fetchJson<{ data?: Array<{ date: string; nav: string }> }>(url);
-  const rows = json.data || [];
-
-  const series = rows
-    .map((r) => {
-      const parts = r.date.split("-");
-      if (parts.length !== 3) return null;
-      const ts = Date.UTC(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
-      const nav = Number(r.nav);
-      if (!Number.isFinite(ts) || !Number.isFinite(nav)) return null;
-      return { ts, price: nav } as PricePoint;
-    })
-    .filter((v): v is PricePoint => Boolean(v))
-    .sort((a, b) => a.ts - b.ts);
+  const series = parseMfNavSeries(json.data || []);
 
   if (!series.length) throw new Error(`No NAV data for scheme ${asCode}`);
   return summarizeSeries(series, purchaseDate);
+};
+
+export const fetchMutualFundSipSnapshot = async (
+  schemeCode: string,
+  sipStartDate: string,
+  sipAmount: number,
+  sipDay: number
+): Promise<MfSipSnapshot> => {
+  const code = String(schemeCode || "").match(/\d{5,8}/)?.[0];
+  if (!code) throw new Error("SIP tracking expects valid mfapi scheme code.");
+  if (!Number.isFinite(sipAmount) || sipAmount <= 0) throw new Error("SIP amount must be positive.");
+
+  const json = await fetchJson<{ data?: Array<{ date: string; nav: string }> }>(`https://api.mfapi.in/mf/${code}`);
+  const series = parseMfNavSeries(json.data || []);
+  if (!series.length) throw new Error(`No NAV data for scheme ${code}`);
+
+  const installmentDates = buildSipInstallmentDates(sipStartDate, sipDay);
+  let totalUnits = 0;
+  let investedAmount = 0;
+  for (const ts of installmentDates) {
+    const nav = findPriceOnOrBefore(series, ts);
+    if (!Number.isFinite(nav) || nav <= 0) continue;
+    totalUnits += sipAmount / nav;
+    investedAmount += sipAmount;
+  }
+
+  const currentPrice = round2(series[series.length - 1].price);
+  const quantity = round2(totalUnits);
+  const currentValue = round2(totalUnits * currentPrice);
+  const avgPurchasePrice = totalUnits > 0 ? round2(investedAmount / totalUnits) : currentPrice;
+
+  return {
+    investedAmount: round2(investedAmount),
+    quantity,
+    currentPrice,
+    currentValue,
+    avgPurchasePrice,
+    startOfDay: round2(priceAtOffsetFromEnd(series, 1)),
+    startOfWeek: round2(priceAtOffsetFromEnd(series, 5)),
+    startOfMonth: round2(priceAtOffsetFromEnd(series, 21)),
+  };
 };
 
 const mergeGoldSeries = (xau: PricePoint[], usdInr: PricePoint[]): PricePoint[] => {
@@ -430,7 +573,11 @@ export const searchInstruments = async (query: string, type: AssetType): Promise
   if (q.length < 2) return [];
 
   if (type === AssetType.STOCKS) {
-    const symbols = await resolveYahooTopSymbols(q, ["EQUITY"], 3);
+    const cleanedQuery = q.replace(/[-_/.,]+/g, " ").replace(/\s+/g, " ").trim();
+    let symbols = await resolveYahooTopSymbols(cleanedQuery || q, ["EQUITY"], 3);
+    if (!symbols.length && cleanedQuery && cleanedQuery !== q) {
+      symbols = await resolveYahooTopSymbols(q, ["EQUITY"], 3);
+    }
     const priced = await Promise.all(
       symbols.map(async (symbol) => ({
         label: symbol,
@@ -444,9 +591,11 @@ export const searchInstruments = async (query: string, type: AssetType): Promise
 
   if (type === AssetType.MUTUAL_FUNDS) {
     const schemes = await loadMfSchemes();
-    const top = schemes
-      .filter((s) => s.schemeName.toLowerCase().includes(q.toLowerCase()))
-      .slice(0, 3);
+    const ranked = schemes
+      .map((s) => ({ ...s, _score: scoreSchemeMatch(q, s.schemeName) }))
+      .filter((s) => s._score > 0)
+      .sort((a, b) => b._score - a._score);
+    const top = ranked.slice(0, 6);
 
     const priced = await Promise.all(
       top.map(async (s) => {

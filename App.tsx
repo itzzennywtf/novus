@@ -5,7 +5,7 @@ import { ASSET_META } from './constants';
 import { CustomPieChart, PerformanceLineChart, ProfitBarChart, ComparisonBarChart } from './components/Charts';
 import { AssetCard } from './components/AssetCard';
 import { getAssetSpecificInsights, getPortfolioAssistantReply, getHoldingPredictionFromLLM, getPortfolioRiskFromLLM, type AssistantChatTurn } from './services/geminiService';
-import { fetchMarketData, calculateFDGrowth, searchInstruments, InstrumentSuggestion } from './services/priceService';
+import { fetchMarketData, calculateFDGrowth, searchInstruments, InstrumentSuggestion, fetchMutualFundSipSnapshot } from './services/priceService';
 import { loadPortfolioState, savePortfolioState } from './services/supabaseService';
 
 type ChatMessage = {
@@ -111,7 +111,8 @@ const App: React.FC = () => {
   const [selectedSuggestion, setSelectedSuggestion] = useState<InstrumentSuggestion | null>(null);
   const [formData, setFormData] = useState({
     name: '', quantity: '', date: new Date().toISOString().split('T')[0],
-    pricePaid: '', amount: '', interestRate: '7.0'
+    pricePaid: '', amount: '', interestRate: '7.0',
+    sipMode: false, sipAmount: '', sipDay: '5'
   });
   const investmentsRef = useRef<Investment[]>(investments);
   const aiChatScrollRef = useRef<HTMLDivElement | null>(null);
@@ -207,6 +208,25 @@ const App: React.FC = () => {
             if (item.type === AssetType.FIXED_DEPOSIT) {
               const current = calculateFDGrowth(item.investedAmount, item.interestRate || 7, item.purchaseDate);
               return { ...item, currentValue: current, lastUpdated: new Date().toISOString() };
+            }
+            if (item.type === AssetType.MUTUAL_FUNDS && item.isSip && item.trackingSymbol && item.sipAmount) {
+              const sip = await fetchMutualFundSipSnapshot(
+                item.trackingSymbol,
+                item.purchaseDate,
+                item.sipAmount,
+                item.sipDay || 5
+              );
+              return {
+                ...item,
+                investedAmount: sip.investedAmount,
+                quantity: sip.quantity,
+                purchasePrice: sip.avgPurchasePrice,
+                currentValue: sip.currentValue,
+                lastUpdated: new Date().toISOString(),
+                priceStartOfDay: sip.startOfDay,
+                priceStartOfWeek: sip.startOfWeek,
+                priceStartOfMonth: sip.startOfMonth,
+              };
             }
 
             let fixedSymbol = item.trackingSymbol;
@@ -553,6 +573,8 @@ const App: React.FC = () => {
         priceStartOfDay: totalQty > 0 ? startDayValue / totalQty : prev.priceStartOfDay,
         priceStartOfWeek: totalQty > 0 ? startWeekValue / totalQty : prev.priceStartOfWeek,
         priceStartOfMonth: totalQty > 0 ? startMonthValue / totalQty : prev.priceStartOfMonth,
+        isSip: Boolean(prev.isSip || item.isSip),
+        sipAmount: (prev.sipAmount || 0) + (item.sipAmount || 0) || undefined,
         memberIds: [...(prev.memberIds || []), item.id],
       });
     });
@@ -921,6 +943,9 @@ const App: React.FC = () => {
       let trackingSymbol: string | undefined;
       let displaySymbol: string | undefined;
       let displayName = formData.name.trim();
+      const isMfSip = newAssetType === AssetType.MUTUAL_FUNDS && formData.sipMode;
+      const sipAmount = parseFloat(formData.sipAmount) || 0;
+      const sipDay = Math.max(1, Math.min(28, parseInt(formData.sipDay || '5', 10) || 5));
 
       if (newAssetType === AssetType.FIXED_DEPOSIT) {
         invAmt = parseFloat(formData.amount); purPr = invAmt; qty = 1;
@@ -941,6 +966,22 @@ const App: React.FC = () => {
           }
         }
 
+        if (isMfSip) {
+          if (!trackingSymbol) {
+            throw new Error('Select a mutual fund from suggestions or enter valid scheme code.');
+          }
+          if (!Number.isFinite(sipAmount) || sipAmount <= 0) {
+            throw new Error('Enter valid SIP amount.');
+          }
+          const sip = await fetchMutualFundSipSnapshot(trackingSymbol, formData.date, sipAmount, sipDay);
+          invAmt = sip.investedAmount;
+          qty = sip.quantity;
+          purPr = sip.avgPurchasePrice;
+          curVal = sip.currentValue;
+          sDay = sip.startOfDay;
+          sWeek = sip.startOfWeek;
+          sMonth = sip.startOfMonth;
+        } else {
         const searchName = newAssetType === AssetType.GOLD ? '24K Gold 1g India' : (trackingSymbol || formData.name);
         const effectiveDate = newAssetType === AssetType.GOLD ? new Date().toISOString().split('T')[0] : formData.date;
         const market = await fetchMarketData(searchName, newAssetType!, effectiveDate, { fixedSymbol: trackingSymbol });
@@ -952,6 +993,7 @@ const App: React.FC = () => {
         sDay = periodBaseline(pseudoItem, market.startOfDay, startOfToday(), usePurchaseFallback);
         sWeek = periodBaseline(pseudoItem, market.startOfWeek, startOfWeek(), usePurchaseFallback);
         sMonth = periodBaseline(pseudoItem, market.startOfMonth, startOfMonth(), usePurchaseFallback);
+        }
       }
 
       const newInv: Investment = {
@@ -959,14 +1001,18 @@ const App: React.FC = () => {
         name: displayName || formData.name, type: newAssetType!, trackingSymbol, displaySymbol, investedAmount: invAmt, currentValue: curVal,
         quantity: qty, purchasePrice: purPr, purchaseDate: formData.date, lastUpdated: new Date().toISOString(),
         priceStartOfDay: sDay, priceStartOfWeek: sWeek, priceStartOfMonth: sMonth,
-        interestRate: newAssetType === AssetType.FIXED_DEPOSIT ? parseFloat(formData.interestRate) : undefined
+        interestRate: newAssetType === AssetType.FIXED_DEPOSIT ? parseFloat(formData.interestRate) : undefined,
+        isSip: isMfSip || undefined,
+        sipAmount: isMfSip ? sipAmount : undefined,
+        sipDay: isMfSip ? sipDay : undefined,
+        sipFrequency: isMfSip ? 'MONTHLY' : undefined
       };
 
       setInvestments(prev => [...prev, newInv]);
       setFormStep(1); setNewAssetType(null); setView('HOME');
       setSelectedSuggestion(null);
       setInstrumentSuggestions([]);
-      setFormData({ name: '', quantity: '', date: new Date().toISOString().split('T')[0], pricePaid: '', amount: '', interestRate: '7.0' });
+      setFormData({ name: '', quantity: '', date: new Date().toISOString().split('T')[0], pricePaid: '', amount: '', interestRate: '7.0', sipMode: false, sipAmount: '', sipDay: '5' });
     } catch (e) {
       alert("Recording failed. Check your connection.");
     } finally {
@@ -1117,7 +1163,11 @@ const App: React.FC = () => {
             <button key={item.id} onClick={() => navigateToHolding(item)} className="w-full bg-white p-8 rounded-[3rem] premium-shadow border border-slate-50 flex items-center justify-between group transition-all hover:border-indigo-100">
               <div className="text-left">
                 <h5 className="font-black text-slate-900 text-lg group-hover:text-indigo-600 transition-colors">{item.name}</h5>
-                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{item.quantity} units • {new Date(item.purchaseDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest">
+                  {item.isSip && item.sipAmount
+                    ? `SIP ${profile.currency}${Math.round(item.sipAmount).toLocaleString('en-IN')}/mo • ${new Date(item.purchaseDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`
+                    : `${item.quantity} units • ${new Date(item.purchaseDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`}
+                </p>
               </div>
               <div className="text-right">
                 <p className="font-black text-slate-900 text-xl tracking-tight">{profile.currency}{item.currentValue.toLocaleString('en-IN')}</p>
@@ -1650,10 +1700,31 @@ const App: React.FC = () => {
                       </div>
                     )}
                  </div>
-                 {newAssetType !== AssetType.FIXED_DEPOSIT && <div className="space-y-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-4">{newAssetType === AssetType.GOLD ? 'Grams' : 'Shares / Units'}</label><input type="number" className="w-full bg-slate-50 p-6 rounded-[2rem] font-black text-3xl" value={formData.quantity} onChange={e=>setFormData({...formData, quantity:e.target.value})} /></div>}
+                 {newAssetType === AssetType.MUTUAL_FUNDS && (
+                   <div className="space-y-2">
+                     <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Investment Mode</label>
+                     <div className="grid grid-cols-2 gap-3">
+                       <button type="button" onClick={() => setFormData({ ...formData, sipMode: false })} className={`py-4 rounded-2xl text-xs font-black uppercase tracking-wider ${!formData.sipMode ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>One-time</button>
+                       <button type="button" onClick={() => setFormData({ ...formData, sipMode: true })} className={`py-4 rounded-2xl text-xs font-black uppercase tracking-wider ${formData.sipMode ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>SIP</button>
+                     </div>
+                   </div>
+                 )}
+                 {newAssetType !== AssetType.FIXED_DEPOSIT && !(newAssetType === AssetType.MUTUAL_FUNDS && formData.sipMode) && <div className="space-y-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-4">{newAssetType === AssetType.GOLD ? 'Grams' : 'Shares / Units'}</label><input type="number" className="w-full bg-slate-50 p-6 rounded-[2rem] font-black text-3xl" value={formData.quantity} onChange={e=>setFormData({...formData, quantity:e.target.value})} /></div>}
+                 {newAssetType === AssetType.MUTUAL_FUNDS && formData.sipMode && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-400 ml-4">Monthly SIP</label>
+                      <input type="number" className="w-full bg-slate-50 p-6 rounded-[2rem] font-black" value={formData.sipAmount} onChange={e=>setFormData({...formData, sipAmount:e.target.value})} />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase text-slate-400 ml-4">SIP Day (1-28)</label>
+                      <input type="number" min={1} max={28} className="w-full bg-slate-50 p-6 rounded-[2rem] font-black" value={formData.sipDay} onChange={e=>setFormData({...formData, sipDay:e.target.value})} />
+                    </div>
+                  </div>
+                 )}
                  {newAssetType === AssetType.GOLD && <div className="space-y-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-4">Price Paid / Gram</label><input type="number" className="w-full bg-slate-50 p-6 rounded-[2rem] font-black text-3xl" value={formData.pricePaid} onChange={e=>setFormData({...formData, pricePaid:e.target.value})} /></div>}
                  {newAssetType === AssetType.FIXED_DEPOSIT && <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-4">Principal</label><input type="number" className="w-full bg-slate-50 p-6 rounded-[2rem] font-black" value={formData.amount} onChange={e=>setFormData({...formData, amount:e.target.value})} /></div><div className="space-y-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-4">Interest %</label><input type="number" className="w-full bg-slate-50 p-6 rounded-[2rem] font-black" value={formData.interestRate} onChange={e=>setFormData({...formData, interestRate:e.target.value})} /></div></div>}
-                 <div className="space-y-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-4">Purchase Date</label><input type="date" className="w-full bg-slate-50 p-6 rounded-[2rem] font-bold" value={formData.date} onChange={e=>setFormData({...formData, date:e.target.value})} /></div>
+                 <div className="space-y-2"><label className="text-[10px] font-black uppercase text-slate-400 ml-4">{newAssetType === AssetType.MUTUAL_FUNDS && formData.sipMode ? 'SIP Start Date' : 'Purchase Date'}</label><input type="date" className="w-full bg-slate-50 p-6 rounded-[2rem] font-bold" value={formData.date} onChange={e=>setFormData({...formData, date:e.target.value})} /></div>
                  <button disabled={isProcessing} onClick={processNewInvestment} className="w-full bg-slate-900 text-white py-8 rounded-[3rem] font-black text-xl shadow-2xl disabled:opacity-50 mt-10">{isProcessing ? 'SCANNING MARKETS...' : 'RECORD ASSET'}</button>
               </div>
             )}
@@ -1770,5 +1841,3 @@ const NavButton: React.FC<{ active: boolean, onClick: () => void, icon: React.Re
 );
 
 export default App;
-
-

@@ -52,7 +52,7 @@ type NemotronStreamChunk = {
 };
 
 const MODEL = "nvidia/nemotron-3-nano-30b-a3b";
-const BASE_URLS = ["/api/nvidia/v1", "https://integrate.api.nvidia.com/v1"];
+const BASE_URLS = ["/api/nvidia/v1"];
 const API_KEY = import.meta.env.VITE_NVIDIA_API_KEY as string | undefined;
 const MAX_RESPONSE_TOKENS = 1024;
 const LLM_RETRIES = 3;

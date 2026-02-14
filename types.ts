@@ -25,6 +25,10 @@ export interface Investment {
   priceStartOfMonth?: number;
   interestRate?: number;
   tenureYears?: number;
+  isSip?: boolean;
+  sipAmount?: number;
+  sipDay?: number;
+  sipFrequency?: "MONTHLY";
 }
 
 export interface Goal {
